@@ -24,7 +24,6 @@ Thumbs.db
 .idea/
 
 # Project specific
-knowledge_base.db
 *.log
 FDC_Case_Analysis_Result.csv
 test_result.csv

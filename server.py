@@ -33,13 +33,33 @@ MODEL_NAME = 'gemini-2.5-pro'
 # Adapt DB path for Render persistent storage
 if os.environ.get('RENDER'):
     DB_PATH = "/var/lib/data/knowledge_base.db"
-    # Auto-seed logic: If DB is missing in persistent storage but exists in repo, copy it.
+    repo_db_path = "knowledge_base.db"
+    
+    should_seed = False
     if not os.path.exists(DB_PATH):
-        import shutil
-        repo_db_path = "knowledge_base.db"
+        should_seed = True
+        logger.info("DB not found on disk. Marking for seed.")
+    else:
+        # Check if existing DB is valid (has tables)
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='knowledge_points'")
+            if cursor.fetchone()[0] == 0:
+                logger.warning("Existing DB on disk is missing 'knowledge_points' table. Marking for re-seed...")
+                should_seed = True
+            conn.close()
+        except Exception as e:
+             logger.warning(f"Existing DB check failed: {e}. Marking for re-seed...")
+             should_seed = True
+
+    if should_seed:
         if os.path.exists(repo_db_path):
             try:
-                logger.info(f"First run detected: Seeding database from {repo_db_path} to {DB_PATH}...")
+                import shutil
+                logger.info(f"Seeding database from {repo_db_path} to {DB_PATH}...")
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
                 shutil.copy(repo_db_path, DB_PATH)
                 logger.info("Database seeded successfully.")
             except Exception as e:
