@@ -33,7 +33,7 @@ export default function PasswordGate({ onUnlock }: Props) {
       >
         {/* Heading aligned with UploadZone style */}
         <h1 className="font-serif text-5xl md:text-6xl text-finance-ink mb-8 leading-tight font-bold">
-          FDC <br/> <span className="italic text-finance-subtle font-normal">Internal Access</span>
+          FDC <br/> <span className="italic text-finance-subtle font-normal">内部访问系统</span>
         </h1>
 
         <form onSubmit={handleSubmit} className="relative w-full max-w-md mx-auto">
@@ -42,7 +42,7 @@ export default function PasswordGate({ onUnlock }: Props) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="ENTER PASSWORD"
+              placeholder="请输入访问密码"
               className="w-full bg-transparent text-center text-3xl md:text-4xl font-serif text-finance-ink placeholder-gray-200 border-none outline-none focus:ring-0 py-4 tracking-widest transition-all"
               autoFocus
             />
@@ -55,7 +55,7 @@ export default function PasswordGate({ onUnlock }: Props) {
             animate={{ opacity: error ? 1 : 0 }}
             className="text-rose-500 text-xs font-bold tracking-widest mt-4 uppercase"
           >
-            Access Denied
+            密码错误
           </motion.p>
 
           <button 
@@ -67,7 +67,7 @@ export default function PasswordGate({ onUnlock }: Props) {
         </form>
         
         <div className="mt-16 text-finance-subtle text-xs font-mono uppercase tracking-[0.2em] opacity-40">
-           Restricted Area · FDSM 2025
+           仅限内部人员访问 · FDSM 2025
         </div>
       </motion.div>
     </div>

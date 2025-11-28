@@ -1467,7 +1467,7 @@ def generate_paper_html_string(data):
 
         <h2>1. 综合分析结论</h2>
         <p>
-            本报告对文稿 *“{title}”* 进行了理论框架重合度分析。
+            本报告对文稿 <b>“{title}”</b> 进行了理论框架重合度分析。
             综合评估结果显示，文稿的原创度风险等级为：<b>{risk_level}</b>，总重复率为 <b>{overlap_rate}%</b>。
             具体分析如下：
         </p>
@@ -1476,13 +1476,13 @@ def generate_paper_html_string(data):
         
         <h3>1.2 显性理论框架统计</h3>
         <p>
-            在文稿中*显性提及*的理论框架中，存在 <b>{exp_stats.get('high', 0)}</b> 处高度重合，
+            在文稿中<b>显性提及</b>的理论框架中，存在 <b>{exp_stats.get('high', 0)}</b> 处高度重合，
             <b>{exp_stats.get('med', 0)}</b> 处次重合，以及 <b>{exp_stats.get('low', 0)}</b> 处一般重合。
         </p>
 
         <h3>1.3 隐性逻辑结构统计</h3>
         <p>
-            在文稿中*隐性逻辑结构*方面，存在 <b>{imp_stats.get('high', 0)}</b> 处高度重合，
+            在文稿中<b>隐性逻辑结构</b>方面，存在 <b>{imp_stats.get('high', 0)}</b> 处高度重合，
             <b>{imp_stats.get('med', 0)}</b> 处次重合，以及 <b>{imp_stats.get('low', 0)}</b> 处一般重合。
         </p>
         
