@@ -67,7 +67,7 @@ export default function PasswordGate({ onUnlock }: Props) {
         </form>
         
         <div className="mt-16 text-finance-subtle text-xs font-mono uppercase tracking-[0.2em] opacity-40">
-           仅限内部人员访问 · FDSM 2025
+           仅限内部人员访问
         </div>
       </motion.div>
     </div>
