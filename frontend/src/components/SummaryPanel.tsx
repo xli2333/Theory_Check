@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { motion } from 'framer-motion';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, CartesianGrid
@@ -9,11 +9,7 @@ interface Props {
   summary: any;
 }
 
-const COLORS = {
-  high: '#000000',   // Black for Critical
-  medium: '#94a3b8', // Slate 400 for Medium
-  low: '#e2e8f0',    // Slate 200 for Low
-};
+
 
 export default function SummaryPanel({ summary }: Props) {
   const analysis = summary.analysis || {};
@@ -154,7 +150,7 @@ export default function SummaryPanel({ summary }: Props) {
                                 itemStyle={{ color: '#fff', fontFamily: 'monospace' }}
                             />
                             <Bar dataKey="count" fill="#334155" radius={[2, 2, 0, 0]} barSize={40}>
-                                {yearData.map((entry: any, index: number) => (
+                                {yearData.map((_entry: any, index: number) => (
                                     <Cell key={`cell-${index}`} fill="#334155" />
                                 ))}
                             </Bar>

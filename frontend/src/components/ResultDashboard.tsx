@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, ArrowLeft, ShieldCheck, Printer, Loader2, FileText } from 'lucide-react'; // Added FileText icon
 import axios from 'axios';
