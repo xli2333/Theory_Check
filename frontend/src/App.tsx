@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import UploadZone from './components/UploadZone';
 import LoadingState from './components/LoadingState';
 import ResultDashboard from './components/ResultDashboard';
+import PasswordGate from './components/PasswordGate';
 
 // 更新 ReportData 接口以匹配后端结构
 export interface ReportData {
@@ -39,10 +40,24 @@ export interface ReportData {
 }
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [status, setStatus] = useState<'idle' | 'analyzing' | 'done'>('idle');
   const [report, setReport] = useState<ReportData | null>(null);
   const [progress, setProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState("正在初始化...");
+
+  // Check session storage on mount to persist login during refresh
+  useEffect(() => {
+    const isUnlocked = sessionStorage.getItem('fdc_unlocked');
+    if (isUnlocked === 'true') {
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  const handleUnlock = () => {
+    setIsAuthenticated(true);
+    sessionStorage.setItem('fdc_unlocked', 'true');
+  };
 
   const handleFileUpload = (file: File) => {
     setStatus('analyzing');
@@ -100,27 +115,36 @@ function App() {
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-6 relative overflow-hidden bg-[#F8FAFC]">
       
-      <motion.div 
-        layout 
-        className={`absolute top-8 left-8 z-50 flex items-center gap-3 cursor-pointer`}
-        onClick={() => setStatus('idle')}
-      >
-        <span className="font-serif text-lg tracking-wider text-finance-ink font-bold border-l-4 border-finance-ink pl-3">
-          复旦商业案例智能审查系统
-        </span>
-      </motion.div>
+      {isAuthenticated && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className={`absolute top-8 left-8 z-50 flex items-center gap-3 cursor-pointer`}
+          onClick={() => setStatus('idle')}
+        >
+          <span className="font-serif text-lg tracking-wider text-finance-ink font-bold border-l-4 border-finance-ink pl-3">
+            复旦商业案例智能审查系统
+          </span>
+        </motion.div>
+      )}
 
       <AnimatePresence mode='wait'>
-        {status === 'idle' && (
-          <UploadZone key="upload" onFileSelect={handleFileUpload} />
-        )}
-        
-        {status === 'analyzing' && (
-          <LoadingState key="loading" progress={progress} message={loadingMessage} />
-        )}
+        {!isAuthenticated ? (
+           <PasswordGate key="gate" onUnlock={handleUnlock} />
+        ) : (
+          <>
+            {status === 'idle' && (
+              <UploadZone key="upload" onFileSelect={handleFileUpload} />
+            )}
+            
+            {status === 'analyzing' && (
+              <LoadingState key="loading" progress={progress} message={loadingMessage} />
+            )}
 
-        {status === 'done' && report && (
-          <ResultDashboard key="result" data={report} onReset={() => setStatus('idle')} />
+            {status === 'done' && report && (
+              <ResultDashboard key="result" data={report} onReset={() => setStatus('idle')} />
+            )}
+          </>
         )}
       </AnimatePresence>
       
