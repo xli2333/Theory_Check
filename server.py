@@ -33,6 +33,19 @@ MODEL_NAME = 'gemini-2.5-pro'
 # Adapt DB path for Render persistent storage
 if os.environ.get('RENDER'):
     DB_PATH = "/var/lib/data/knowledge_base.db"
+    # Auto-seed logic: If DB is missing in persistent storage but exists in repo, copy it.
+    if not os.path.exists(DB_PATH):
+        import shutil
+        repo_db_path = "knowledge_base.db"
+        if os.path.exists(repo_db_path):
+            try:
+                logger.info(f"First run detected: Seeding database from {repo_db_path} to {DB_PATH}...")
+                shutil.copy(repo_db_path, DB_PATH)
+                logger.info("Database seeded successfully.")
+            except Exception as e:
+                logger.error(f"Failed to seed database: {e}")
+        else:
+            logger.warning(f"No seed database found at {repo_db_path}. Starting with empty DB.")
 else:
     DB_PATH = "knowledge_base.db"
 
