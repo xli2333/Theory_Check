@@ -75,7 +75,11 @@ export default function ResultDashboard({ data, onReset }: Props) {
           <div>
             <span className="block text-xs font-bold text-finance-subtle uppercase tracking-wider mb-2">精准重合项</span>
             <span className="text-5xl font-mono font-light text-finance-alert">
-              {String(data.summary.analysis?.explicit_stats?.high || 0).padStart(2, '0')} {/* Updated to use analysis stats */}
+              {String(
+                (data.summary.analysis?.explicit_stats?.high || 0) + 
+                (data.summary.analysis?.explicit_stats?.med || 0) + 
+                (data.summary.analysis?.explicit_stats?.low || 0)
+              ).padStart(2, '0')}
             </span>
           </div>
           <div>

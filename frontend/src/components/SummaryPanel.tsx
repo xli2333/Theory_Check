@@ -39,9 +39,10 @@ export default function SummaryPanel({ summary }: Props) {
   // Dynamic Text Colors based on Risk
   const getRiskColor = (level: string) => {
       if (level === '高风险') return 'text-rose-700';
-      if (level === '逻辑风险') return 'text-amber-700';
-      if (level === '中度风险') return 'text-orange-600';
-      if (level === '风险') return 'text-amber-700';
+      if (level === '中等风险') return 'text-orange-600';
+      if (level === '低风险') return 'text-emerald-700';
+      if (level === '逻辑风险') return 'text-amber-700'; // Keep for legacy/implicit if needed
+      if (level === '中度风险') return 'text-orange-600'; // Keep for legacy
       return 'text-emerald-700';
   };
 
@@ -67,9 +68,6 @@ export default function SummaryPanel({ summary }: Props) {
                      <h1 className={`text-6xl font-serif font-bold tracking-tight ${getRiskColor(riskLevel)}`}>
                         {riskLevel}
                      </h1>
-                     <span className="text-2xl text-slate-300 font-light">
-                        / {analysis.overlap_rate || 0}% 重复率
-                     </span>
                  </div>
                  <p className="text-xl font-serif text-slate-600 leading-relaxed max-w-2xl">
                     {analysis.risk_description || "系统正在分析文稿的原创性..."}

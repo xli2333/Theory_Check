@@ -700,30 +700,23 @@ def generate_analysis_summary(explicit_results, implicit_results, all_new_items)
 
         total_matches = total_explicit_matches + total_implicit_matches
 
-        # 计算重复率
-        if total_items > 0:
-            overlap_rate = (total_matches / total_items) * 100
-        else:
-            overlap_rate = 0
+        # 计算重复率 - 已移除显示，设为0
+        overlap_rate = 0
 
-        # 2. 风险等级综合评估
-        # 显性高度重合权重最高，隐性高度重合次之
-        if exp_high > 0:
+        # 2. 风险等级综合评估 - 只看显性理论匹配
+        # 0-2为低风险 3-4为中等风险 5及5以上为高风险
+        if total_explicit_matches >= 5:
             risk_level = "高风险"
             risk_color = "red"
-            risk_desc = f"检测到 {exp_high} 处显性理论高度重合，说明文中直接使用了常见的分析框架。"
-        elif imp_high > 0:
-            risk_level = "逻辑风险" # 新增状态
-            risk_color = "amber"
-            risk_desc = f"虽未直接提及理论名，但有 {imp_high} 处核心分析逻辑与历史高频案例高度一致。"
-        elif exp_med > 0 or imp_med > 0:
-            risk_level = "中度风险"
+            risk_desc = f"检测到 {total_explicit_matches} 处显性理论匹配，风险较高，建议大幅修改。"
+        elif total_explicit_matches >= 3:
+            risk_level = "中等风险"
             risk_color = "orange"
-            risk_desc = f"发现 {exp_med + imp_med} 处次级重合，建议优化表述以体现差异化。"
+            risk_desc = f"检测到 {total_explicit_matches} 处显性理论匹配，存在一定风险，建议优化。"
         else:
-            risk_level = "良好"
+            risk_level = "低风险"
             risk_color = "green"
-            risk_desc = "原创度良好，未发现显著的理论框架重复。"
+            risk_desc = f"仅检测到 {total_explicit_matches} 处显性理论匹配，原创度良好。"
 
         # 提取高频理论名称
         high_overlap_theories = [r['db_term'] for r in explicit_results if r['match_level'] == 'high']
@@ -751,25 +744,25 @@ def generate_analysis_summary(explicit_results, implicit_results, all_new_items)
 
         # 4. 生成建议
         recommendations = []
-        if exp_high > 0:
+        if total_explicit_matches >= 5:
             recommendations.append({
                 "level": "critical",
                 "title": "显性框架重写",
-                "description": f"文中直接使用了 {exp_high} 个高频理论（如 {', '.join(high_overlap_theories[:2])}）。",
+                "description": f"文中直接使用了 {total_explicit_matches} 个理论框架。",
                 "action": "建议完全替换为更具针对性的行业模型，或结合企业特性进行大幅改造。"
             })
-        if imp_high > 0:
+        elif total_explicit_matches >= 3:
             recommendations.append({
                 "level": "warning",
-                "title": "隐性逻辑差异化",
-                "description": f"有 {imp_high} 处分析逻辑与经典模型雷同。",
-                "action": "建议在论述中增加独特的分析维度，避免落入俗套。"
+                "title": "理论应用优化",
+                "description": f"有 {total_explicit_matches} 处理论框架使用。",
+                "action": "建议在论述中增加独特的分析维度，体现差异化。"
             })
-        if not recommendations:
+        else:
             recommendations.append({
                 "level": "success",
                 "title": "保持原创",
-                "description": "理论框架使用较为独特。",
+                "description": "显性理论框架使用较少。",
                 "action": "继续保持当前的分析深度。"
             })
 
@@ -777,7 +770,7 @@ def generate_analysis_summary(explicit_results, implicit_results, all_new_items)
             "risk_level": risk_level,
             "risk_color": risk_color,
             "risk_description": risk_desc,
-            "overlap_rate": round(overlap_rate, 1),
+            "overlap_rate": 0, # 不再显示重复率
             "total_matches": total_matches,
             "explicit_stats": {"high": exp_high, "med": exp_med, "low": exp_low},
             "implicit_stats": {"high": imp_high, "med": imp_med, "low": imp_low},
@@ -1346,7 +1339,6 @@ def generate_html_string(data):
                 <div>
                     <div class="flex items-baseline gap-4 mb-6">
                         <span class="text-6xl font-serif font-bold {header_color}">{risk_level}</span>
-                        <span class="text-2xl text-slate-400 font-light">/ {analysis.get('overlap_rate', 0)}% 重复率</span>
                     </div>
                     <p class="text-lg text-slate-700 leading-relaxed font-serif mb-8">
                         {risk_desc}
@@ -1565,7 +1557,7 @@ def generate_paper_html_string(data):
         <h2>1. 综合分析结论</h2>
         <p>
             本报告对文稿 <b>“{title}”</b> 进行了理论框架重合度分析。
-            综合评估结果显示，文稿的原创度风险等级为：<b>{risk_level}</b>，总重复率为 <b>{overlap_rate}%</b>。
+            综合评估结果显示，文稿的原创度风险等级为：<b>{risk_level}</b>。
             具体分析如下：
         </p>
         <h3>1.1 风险评估概览</h3>
