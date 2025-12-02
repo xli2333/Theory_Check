@@ -31,13 +31,8 @@
     pip install -r requirements.txt
     ```
     （如果 `requirements.txt` 不存在，请根据 `server.py` 中的 `import` 语句手动安装 `fastapi`, `uvicorn`, `google-generativeai`, `pdfplumber`, `pydantic`, `python-dotenv` 等库）
-2.  **配置 API Key 和代理**：
-    在 `server.py` 中更新您的 Gemini API Key 和可选的代理设置。
-    ```python
-    API_KEY = "YOUR_GEMINI_API_KEY"
-    PROXY_URL = "http://127.0.0.1:7897" # 如果需要
     ```
-3.  **运行后端服务**：
+2.  **运行后端服务**：
     ```bash
     python server.py
     ```
