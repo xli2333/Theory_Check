@@ -45,6 +45,7 @@ function App() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [progress, setProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState("正在初始化...");
+  const [searchMode, setSearchMode] = useState<'general' | 'precision'>('general');
 
   // Check session storage on mount to persist login during refresh
   useEffect(() => {
@@ -65,7 +66,7 @@ function App() {
     
     // Get WebSocket URL from env or default to local
     const wsUrl = import.meta.env.VITE_WS_URL || `ws://${window.location.hostname}:8000`;
-    const ws = new WebSocket(`${wsUrl}/ws/${Date.now()}`);
+    const ws = new WebSocket(`${wsUrl}/ws/${Date.now()}?mode=${searchMode}`);
     
     ws.onopen = () => {
       // 发送文件二进制数据
@@ -134,7 +135,12 @@ function App() {
         ) : (
           <>
             {status === 'idle' && (
-              <UploadZone key="upload" onFileSelect={handleFileUpload} />
+              <UploadZone 
+                key="upload" 
+                onFileSelect={handleFileUpload} 
+                searchMode={searchMode}
+                onModeChange={setSearchMode}
+              />
             )}
             
             {status === 'analyzing' && (
