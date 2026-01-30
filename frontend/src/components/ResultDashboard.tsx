@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, ArrowLeft, ShieldCheck, Printer, Loader2, FileText } from 'lucide-react'; // Added FileText icon
+import { ChevronRight, ArrowLeft, ShieldCheck, Printer, Loader2, FileText, FileDown } from 'lucide-react';
 import axios from 'axios';
 import type { ReportData } from '../App';
 import SummaryPanel from './SummaryPanel';
@@ -14,35 +14,40 @@ export default function ResultDashboard({ data, onReset }: Props) {
   const [activeTab, setActiveTab] = useState<'summary' | 'theory'>('summary');
   const [isExporting, setIsExporting] = useState(false);
 
-  // Modified handleDownload to accept reportType
-  const handleDownload = async (reportType: 'dashboard' | 'paper') => {
+  // 支持多种导出类型：dashboard/paper/checklist/checklist_word
+  const handleDownload = async (reportType: 'dashboard' | 'paper' | 'checklist' | 'checklist_word') => {
     setIsExporting(true);
     try {
-      const dataToSend = { ...data, report_type: reportType }; // Pass report_type to backend
-      // Get API URL from env or default to local
+      const dataToSend = { ...data, report_type: reportType };
       const apiUrl = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`;
       const response = await axios.post(`${apiUrl}/api/export`, dataToSend, {
-        responseType: 'blob', // 关键：接收二进制流
+        responseType: 'blob',
       });
 
-      // 创建下载链接
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/html' }));
+      const contentType = response.headers['content-type'] || (reportType === 'checklist_word'
+        ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : 'text/html');
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: contentType }));
       const link = document.createElement('a');
       link.href = url;
-      // Use filename from headers if available, otherwise construct
-      const contentDisposition = response.headers['content-disposition'];
-      let filename = `FDC_Report_${data.meta.filename.replace('.pdf', '')}.html`;
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1];
+      const cd = response.headers['content-disposition'] as string | undefined;
+      let filename = `FDC_Report_${data.meta.filename.replace('.pdf', '')}${reportType === 'checklist_word' ? '.docx' : '.html'}`;
+      if (cd) {
+        // 优先解析 UTF-8 编码格式 filename*
+        const utfMatch = cd.match(/filename\\*?=UTF-8''([^;]+)/i);
+        if (utfMatch && utfMatch[1]) {
+          filename = decodeURIComponent(utfMatch[1]);
+        } else {
+          const asciiMatch = cd.match(/filename=\"?([^\";]+)\"?/i);
+          if (asciiMatch && asciiMatch[1]) {
+            filename = asciiMatch[1];
+          }
         }
       }
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       
-      // 清理
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
@@ -112,14 +117,14 @@ export default function ResultDashboard({ data, onReset }: Props) {
                 <span className="text-lg font-serif font-bold tracking-wide">理论架构查重</span>
             </button>
 
-            <div className="mt-auto pt-8 border-t border-gray-100 flex flex-col gap-3"> {/* Changed to flex col for multiple buttons */}
+            <div className="mt-auto pt-8 border-t border-gray-100 flex flex-col gap-3">
                 <button 
                     onClick={() => handleDownload('dashboard')} // Pass reportType: 'dashboard'
                     disabled={isExporting}
                     className="w-full border border-finance-ink text-finance-ink py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-finance-ink hover:text-white transition-all duration-300 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {isExporting ? (<Loader2 size={16} className="animate-spin" />) : (<Printer size={16} />)}
-                    {isExporting ? "正在生成..." : "导出仪表盘报告"} {/* Updated button text */}
+                    {isExporting ? "正在生成..." : "导出仪表盘报告"}
                 </button>
                  <button 
                     onClick={() => handleDownload('paper')} // New button for paper report
@@ -128,6 +133,22 @@ export default function ResultDashboard({ data, onReset }: Props) {
                 >
                     {isExporting ? (<Loader2 size={16} className="animate-spin" />) : (<FileText size={16} />)}
                     {isExporting ? "正在生成..." : "导出文字版报告"}
+                </button>
+                 <button 
+                    onClick={() => handleDownload('checklist')}
+                    disabled={isExporting}
+                    className="w-full border border-emerald-600 text-emerald-700 py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-600 hover:text-white transition-all duration-300 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {isExporting ? (<Loader2 size={16} className="animate-spin" />) : (<FileText size={16} />)}
+                    {isExporting ? "正在生成..." : "导出查重报告（HTML）"}
+                </button>
+                 <button 
+                    onClick={() => handleDownload('checklist_word')}
+                    disabled={isExporting}
+                    className="w-full border border-indigo-600 text-indigo-700 py-3 px-4 rounded-lg flex items-center justify-center gap-2 hover:bg-indigo-600 hover:text-white transition-all duration-300 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {isExporting ? (<Loader2 size={16} className="animate-spin" />) : (<FileDown size={16} />)}
+                    {isExporting ? "正在生成..." : "导出查重报告（Word）"}
                 </button>
             </div>
         </div>

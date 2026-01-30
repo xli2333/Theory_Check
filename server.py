@@ -5,6 +5,9 @@ import time
 import asyncio
 import traceback
 import logging
+import csv
+from functools import lru_cache
+from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -537,36 +540,41 @@ async def consolidate_results(results, category_name):
         })
 
     prompt = f"""
-你是一个概念归一化专家。请将以下{category_name}列表中**表示同一概念的不同表述**合并成统一条目。
+    你是一个概念归一化专家。请将以下{category_name}列表中**表示同一概念的不同表述**合并成统一条目。
 
-输入数据：
-{json.dumps(terms_data, ensure_ascii=False, indent=2)}
+    输入数据：
+    {json.dumps(terms_data, ensure_ascii=False, indent=2)}
 
-任务：
-1. 识别哪些术语表示同一个概念（如："资源基础观"、"资源基础理论"、"RBV" 都是同一概念）
-2. 为每组同一概念选择一个**标准名称**（优先选择最完整、最学术的表述）
-3. 输出归一化映射表
+    任务：
+    1. 识别哪些术语表示同一个概念。
+    2. 为每组同一概念选择一个**标准中文名称**。
+    3. **去除冗余英文**：不要在中文后加括号附带英文原名。
+    4. **保留通用缩写**：如果中文惯用语包含缩写（如SWOT分析），请保留，不要强行翻译（不要写成态势分析法）。
 
-输出格式（JSON数组）：
-[
-  {{
-    "standard_term": "资源基础理论 (Resource-Based View)",
-    "variants": ["资源基础观", "资源基础理论", "RBV", "资源基础观 (RBV)"]
-  }}
-]
+    输出格式（JSON数组）：
+    [
+      {{
+        "standard_term": "资源基础理论",
+        "variants": ["资源基础观", "资源基础理论", "RBV", "Resource-Based View"]
+      }},
+      {{
+        "standard_term": "SWOT分析",
+        "variants": ["SWOT", "SWOT Analysis", "态势分析法"]
+      }}
+    ]
 
-**规则**：
-1. 只合并**完全相同的概念**。
-2. 优先选择中文全称 + 英文注释作为标准名称。
-3. 如果不确定是否同一概念，保持独立，不要输出。
+    **规则**：
+    1. 只合并**完全相同的概念**。
+    2. 优先选择最通用的中文学术称谓。
+    3. 如果不确定是否同一概念，保持独立，不要输出。
 
-请输出JSON数组（不要markdown代码块）：
+    请输出JSON数组（不要markdown代码块）：
     """
 
     consolidation_map = []
     try:
         # 使用 Gemini 2.5 Pro
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel(MODEL_NAME)
         logger.info(f"Calling AI for consolidation map...")
         
         res = await asyncio.to_thread(
@@ -677,6 +685,87 @@ async def consolidate_results(results, category_name):
 
     logger.info(f"Consolidated {len(results)} → {len(consolidated_results)} {category_name}")
     return consolidated_results
+
+async def translate_to_chinese_academic(results_list):
+    """
+    将结果列表中的 db_term 翻译为标准的中文学术名称。
+    使用 Gemini 2.5 Pro 进行翻译。
+    """
+    if not results_list:
+        return results_list
+
+    # 1. 提取唯一的 db_term
+    unique_terms = list(set(r['db_term'] for r in results_list))
+    if not unique_terms:
+        return results_list
+        
+    logger.info(f"Translating {len(unique_terms)} terms to Chinese...")
+
+    prompt = f"""
+    你是一个商业管理理论翻译专家。请将以下术语列表翻译为**标准的简体中文学术名称**。
+    
+    规则：
+    1. **去除英文翻译/备注**：不要包含括号内的英文全称或解释。
+    2. **保留通用缩写**：如果该理论在中文学术界通用惯例中包含英文缩写（如 "SWOT分析"、"PEST分析"、"4P营销理论"），请**保留该缩写**，不要强行翻译成生僻中文（如不要把SWOT强行翻成态势分析法）。
+    3. 如果是纯英文术语，请翻译成最通用的中文标准称谓。
+    4. 输出严格的 JSON 字典。
+    
+    示例：
+    - "SWOT Analysis" -> "SWOT分析" (保留SWOT)
+    - "Porter's Five Forces (P5F)" -> "波特五力模型" (去除P5F)
+    - "Resource-Based View" -> "资源基础理论"
+    - "PESTEL" -> "PESTEL模型"
+    
+    输入列表：
+    {json.dumps(unique_terms, ensure_ascii=False, indent=2)}
+    
+    输出 JSON 格式：
+    {{
+      "Original Term 1": "标准中文名称1",
+      "Original Term 2": "标准中文名称2"
+    }}
+    """
+
+    try:
+        # 强制使用 gemini-2.5-pro
+        model = genai.GenerativeModel('gemini-2.5-pro')
+        
+        # 运行生成
+        res = await asyncio.to_thread(
+            model.generate_content,
+            prompt,
+            generation_config={"temperature": 0.1},
+            request_options={'timeout': 60}
+        )
+        
+        raw = res.text.strip()
+        # 清理 markdown
+        if raw.startswith("```"):
+            lines = raw.split('\n')
+            raw = '\n'.join(lines[1:])
+            if raw.endswith("```"):
+                raw = raw[:-3]
+        
+        # 提取 JSON
+        start = raw.find('{')
+        end = raw.rfind('}') + 1
+        if start != -1 and end > start:
+            raw = raw[start:end]
+            translation_map = json.loads(raw)
+            
+            # 更新结果
+            for item in results_list:
+                original = item['db_term']
+                if original in translation_map:
+                    item['db_term'] = translation_map[original]
+            
+            logger.info("Translation completed successfully.")
+            
+    except Exception as e:
+        logger.error(f"Translation failed: {e}")
+        # 失败时保持原样
+        
+    return results_list
 
 def generate_analysis_summary(explicit_results, implicit_results, all_new_items):
     """
@@ -1041,6 +1130,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         explicit_results = await consolidate_results(explicit_results, '理论(显性)')
         implicit_results = await consolidate_results(implicit_results, '理论(隐性)')
 
+        # 新增：强制翻译/标准化为中文
+        await websocket.send_json({
+            "step": "translate",
+            "message": "正在标准化中文术语...",
+            "progress": 98
+        })
+        explicit_results = await translate_to_chinese_academic(explicit_results)
+        implicit_results = await translate_to_chinese_academic(implicit_results)
+
         # 合并用于统计
         all_results = explicit_results + implicit_results
 
@@ -1115,6 +1213,218 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
 from urllib.parse import quote
 
+def normalize_title(title: str) -> str:
+    """Normalize titles for matching."""
+    if not title:
+        return ""
+    t = title.replace("\ufeff", "").strip().lower()
+    if t.endswith(".pdf"):
+        t = t[:-4]
+    return t
+
+@lru_cache(maxsize=1)
+def load_case_lookup(csv_path: str = "database.csv") -> Dict[str, Dict[str, str]]:
+    """Load case metadata from CSV for author/DOI enrichment."""
+    lookup: Dict[str, Dict[str, str]] = {}
+    path = Path(csv_path)
+    if not path.exists():
+        logger.warning(f"{csv_path} not found for checklist enrichment")
+        return lookup
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                title = row.get("案例标题") or row.get("\ufeff案例标题") or ""
+                if not title:
+                    continue
+                norm = normalize_title(title)
+                lookup[norm] = {
+                    "title": title,
+                    "company": row.get("公司", ""),
+                    "author": row.get("第一作者", ""),
+                    "doi": row.get("DOI", ""),
+                }
+    except Exception as e:
+        logger.error(f"Failed to load {csv_path}: {e}")
+    return lookup
+
+def format_case_entry(title: str, lookup: Dict[str, Dict[str, str]]) -> str:
+    """Build display string: 公司（第一作者） DOI."""
+    norm = normalize_title(title)
+    info = lookup.get(norm)
+    if not info:
+        return title
+    company = info.get("company") or ""
+    author = info.get("author") or ""
+    doi = info.get("doi") or ""
+    parts = []
+    if company and author:
+        parts.append(f"{company}（{author}）")
+    elif company:
+        parts.append(company)
+    elif author:
+        parts.append(author)
+    if doi:
+        parts.append(doi)
+    return " ".join(parts) if parts else title
+
+def build_checklist_rows(items: List[Dict[str, Any]], lookup: Dict[str, Dict[str, str]]):
+    rows = []
+    remark_map = {"高度重合": "高频预警", "次重合": "关注", "重合": ""}
+    for idx, item in enumerate(items, 1):
+        concept = item.get("db_term") or item.get("new_term") or f"项{idx}"
+        evidence = item.get("evidence", [])
+        seen = set()
+        case_entries = []
+        for ev in evidence:
+            fname = ev.get("filename", "")
+            norm = normalize_title(fname)
+            if not fname or norm in seen:
+                continue
+            seen.add(norm)
+            case_entries.append(format_case_entry(fname, lookup))
+        count = len(case_entries) if case_entries else len(evidence)
+        remark = remark_map.get(item.get("risk_level"), "")
+        rows.append(
+            {
+                "concept": concept,
+                "count": count,
+                "cases": case_entries,
+                "remark": remark,
+            }
+        )
+    return rows
+
+def generate_checklist_html_string(data: Dict[str, Any]) -> str:
+    """Generate HTML in example.pdf checklist style."""
+    lookup = load_case_lookup()
+    results = data.get("results", {})
+    explicit_rows = build_checklist_rows(results.get("explicit_theories", []), lookup)
+    implicit_rows = build_checklist_rows(results.get("implicit_theories", []), lookup)
+
+    def render_section(title: str, rows):
+        if not rows:
+            return ""
+        body = ""
+        for r in rows:
+            cases = "<br>".join(r["cases"]) if r["cases"] else ""
+            body += f"""
+            <tr>
+                <td style="border:1px solid #000;padding:6px 8px;white-space:nowrap;">{r['concept']}</td>
+                <td style="border:1px solid #000;padding:6px 8px;text-align:center;white-space:nowrap;">{r['count']}</td>
+                <td style="border:1px solid #000;padding:6px 8px;">{cases}</td>
+                <td style="border:1px solid #000;padding:6px 8px;white-space:nowrap;">{r['remark']}</td>
+            </tr>
+            """
+        return f"""
+        <tr>
+            <td colspan="4" style="padding:8px 4px;font-weight:bold;">{title}</td>
+        </tr>
+        {body}
+        """
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <title>查重报告</title>
+        <style>
+            body {{ font-family: "SimSun","Times New Roman",serif; margin: 1.8cm 2.2cm; color: #000; }}
+            h1 {{ text-align:center; font-size:24px; margin:0; }}
+            h2 {{ text-align:center; font-size:20px; margin:6px 0 16px 0; }}
+            table {{ width:100%; border-collapse: collapse; font-size:12px; }}
+            .meta td {{ padding:4px 6px; }}
+            .section-title {{ font-weight:bold; margin-top:12px; }}
+        </style>
+    </head>
+    <body>
+        <h1>复旦管理案例库</h1>
+        <h2>投稿案例教学参考知识点查重报告</h2>
+        <table class="meta">
+            <tr><td>1. 稿件来源：</td><td></td></tr>
+            <tr><td>2. 投稿编号：</td><td></td></tr>
+            <tr><td>3. 案例名称：</td><td></td></tr>
+            <tr><td>4. 查重时间：</td><td></td></tr>
+            <tr><td>5. 查重结果：</td><td></td></tr>
+        </table>
+        <p style="margin:10px 0 6px 0;font-weight:bold;">5. 查重结果：</p>
+        <table style="border:1px solid #000; border-collapse: collapse;">
+            <tr>
+                <th style="border:1px solid #000;padding:6px 8px;white-space:nowrap;">理论/工具/模型</th>
+                <th style="border:1px solid #000;padding:6px 8px;white-space:nowrap;">重合数</th>
+                <th style="border:1px solid #000;padding:6px 8px;">已入库案例企业、一作及 DOI 编号</th>
+                <th style="border:1px solid #000;padding:6px 8px;white-space:nowrap;">备注</th>
+            </tr>
+            {render_section("主概念（显性提及）", explicit_rows)}
+            {render_section("次概念（隐性提及）", implicit_rows)}
+        </table>
+        <p style="font-size:10px;margin-top:12px;">复旦管理案例库以教学应用为导向，为更好地满足教学需要，提高入库案例产品质量，对所有投稿案例采用严谨的学术评审流程。案例中心通过动态搭建最新五年入库案例知识图谱并借助人工智能工具，对新投稿案例的知识点进行查重，供同行评议参考。</p>
+    </body>
+    </html>
+    """
+
+def generate_checklist_docx_bytes(data: Dict[str, Any]) -> bytes:
+    """Generate Word docx for checklist style."""
+    try:
+        from docx import Document
+        from docx.shared import Pt
+    except Exception as e:
+        logger.error(f"python-docx not available: {e}")
+        raise
+
+    lookup = load_case_lookup()
+    results = data.get("results", {})
+    explicit_rows = build_checklist_rows(results.get("explicit_theories", []), lookup)
+    implicit_rows = build_checklist_rows(results.get("implicit_theories", []), lookup)
+
+    def add_section(doc: Any, title: str, rows):
+        if not rows:
+            return
+        doc.add_paragraph(title).runs[0].bold = True
+        table = doc.add_table(rows=len(rows) + 1, cols=4)
+        table.style = "Table Grid"
+        headers = ["理论/工具/模型", "重合数", "已入库案例企业、一作及 DOI 编号", "备注"]
+        for i, h in enumerate(headers):
+            run = table.rows[0].cells[i].paragraphs[0].add_run(h)
+            run.bold = True
+        for ridx, r in enumerate(rows, 1):
+            table.rows[ridx].cells[0].text = str(r["concept"])
+            table.rows[ridx].cells[1].text = str(r["count"])
+            table.rows[ridx].cells[2].text = "\n".join(r["cases"])
+            table.rows[ridx].cells[3].text = r["remark"]
+
+    doc = Document()
+    title1 = doc.add_heading("复旦管理案例库", level=1)
+    title1.alignment = 1
+    title2 = doc.add_heading("投稿案例教学参考知识点查重报告", level=2)
+    title2.alignment = 1
+
+    meta = [
+        "1. 稿件来源：",
+        "2. 投稿编号：",
+        "3. 案例名称：",
+        "4. 查重时间：",
+        "5. 查重结果：",
+    ]
+    for line in meta:
+        doc.add_paragraph(line)
+
+    add_section(doc, "主概念（显性提及）", explicit_rows)
+    add_section(doc, "次概念（隐性提及）", implicit_rows)
+
+    note = (
+        "复旦管理案例库以教学应用为导向，为更好地满足教学需要，提高入库案例产品质量，"
+        "对所有投稿案例采用严谨的学术评审流程。案例中心通过动态搭建最新五年入库案例知识图谱并借助人工智能工具，"
+        "对新投稿案例的知识点进行查重，供同行评议参考。"
+    )
+    doc.add_paragraph(note).runs[0].font.size = Pt(9)
+
+    bio = io.BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    return bio.read()
+
 @app.post("/api/export")
 async def export_report(report: ReportData):
     """
@@ -1122,22 +1432,45 @@ async def export_report(report: ReportData):
     """
     print("Export request received...", flush=True)
     
-    if report.report_type == "paper":
-        html_content = generate_paper_html_string(report.model_dump())
-        raw_filename = f"FDC_Paper_Report_{report.meta.get('filename', 'report').replace('.pdf', '')}.html"
-    else:
-        html_content = generate_html_string(report.model_dump())
-        raw_filename = f"FDC_Dashboard_Report_{report.meta.get('filename', 'report').replace('.pdf', '')}.html"
-    
-    # URL encode filename to support Chinese characters in headers
-    encoded_filename = quote(raw_filename)
+    report_data = report.model_dump()
+    report_type = report.report_type
 
-    # 返回流式响应，触发浏览器下载
-    return HTMLResponse(
-        content=html_content, 
-        media_type="text/html", 
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
-    )
+    if report_type == "paper":
+        html_content = generate_paper_html_string(report_data)
+        raw_filename = f"FDC_Paper_Report_{report.meta.get('filename', 'report').replace('.pdf', '')}.html"
+        encoded_filename = quote(raw_filename)
+        return HTMLResponse(
+            content=html_content, 
+            media_type="text/html", 
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+        )
+    elif report_type == "checklist":
+        html_content = generate_checklist_html_string(report_data)
+        raw_filename = f"FDC_Checklist_Report_{report.meta.get('filename', 'report').replace('.pdf', '')}.html"
+        encoded_filename = quote(raw_filename)
+        return HTMLResponse(
+            content=html_content, 
+            media_type="text/html", 
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+        )
+    elif report_type == "checklist_word":
+        docx_bytes = generate_checklist_docx_bytes(report_data)
+        raw_filename = f"FDC_Checklist_Report_{report.meta.get('filename', 'report').replace('.pdf', '')}.docx"
+        encoded_filename = quote(raw_filename)
+        return StreamingResponse(
+            io.BytesIO(docx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+        )
+    else:
+        html_content = generate_html_string(report_data)
+        raw_filename = f"FDC_Dashboard_Report_{report.meta.get('filename', 'report').replace('.pdf', '')}.html"
+        encoded_filename = quote(raw_filename)
+        return HTMLResponse(
+            content=html_content, 
+            media_type="text/html", 
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+        )
 
 def generate_html_string(data):
     # 将 JSON 转换为高级 HTML 字符串

@@ -5,3 +5,4 @@ google-generativeai
 pdfplumber
 websockets
 pydantic
+python-docx
