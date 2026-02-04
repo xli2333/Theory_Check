@@ -1212,61 +1212,201 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 # --- 导出接口 (NEW) ---
 
 from urllib.parse import quote
+import re
+import difflib
 
-def normalize_title(title: str) -> str:
-    """Normalize titles for matching."""
-    if not title:
+def normalize_key(text: str) -> str:
+    """
+    Robust normalization for keys (titles):
+    1. Remove file extensions
+    2. Remove non-alphanumeric characters (including Chinese punctuation)
+    3. Lowercase
+    """
+    if not text:
         return ""
-    t = title.replace("\ufeff", "").strip().lower()
-    if t.endswith(".pdf"):
-        t = t[:-4]
-    return t
+    # Remove extension if likely a file
+    if text.lower().endswith('.pdf'):
+        text = text[:-4]
+    
+    # Keep only Chinese characters, English letters, and Numbers
+    # This removes spaces, punctuation, special symbols, etc.
+    # Regex explanation: \u4e00-\u9fa5 is Chinese range, a-zA-Z0-9 is alphanumeric
+    cleaned = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', text)
+    return cleaned.lower()
 
 @lru_cache(maxsize=1)
-def load_case_lookup(csv_path: str = "database.csv") -> Dict[str, Dict[str, str]]:
-    """Load case metadata from CSV for author/DOI enrichment."""
-    lookup: Dict[str, Dict[str, str]] = {}
+def load_case_lookup(csv_path: str = "database.csv") -> Dict[str, Any]:
+    """
+    Load case metadata and build a Multi-Index Lookup System.
+    Returns a dict containing:
+    {
+        "by_code": { "FDC-25055...": {info}, ... },
+        "by_title": { "雪王5000店出海": {info}, ... }
+    }
+    """
+    lookup = {
+        "by_code": {},
+        "by_title": {}
+    }
     path = Path(csv_path)
     if not path.exists():
         logger.warning(f"{csv_path} not found for checklist enrichment")
         return lookup
+        
     try:
         with path.open("r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                # 1. Basic Info
                 title = row.get("案例标题") or row.get("\ufeff案例标题") or ""
+                code = row.get("案例编号", "").strip()
+                company = row.get("公司", "")
+                author = row.get("第一作者", "")
+                doi = row.get("DOI", "")
+                
                 if not title:
                     continue
-                norm = normalize_title(title)
-                lookup[norm] = {
+
+                info = {
                     "title": title,
-                    "company": row.get("公司", ""),
-                    "author": row.get("第一作者", ""),
-                    "doi": row.get("DOI", ""),
+                    "code": code,
+                    "company": company,
+                    "author": author,
+                    "doi": doi,
                 }
+
+                # 2. Index by Code (if exists)
+                if code:
+                    # Normalize code: remove spaces, uppercase
+                    clean_code = code.replace(" ", "").upper()
+                    lookup["by_code"][clean_code] = info
+
+                # 3. Index by Title (Normalized)
+                clean_title = normalize_key(title)
+                if clean_title:
+                    lookup["by_title"][clean_title] = info
+                    
     except Exception as e:
         logger.error(f"Failed to load {csv_path}: {e}")
+        
+    logger.info(f"Loaded Case Lookup: {len(lookup['by_code'])} codes, {len(lookup['by_title'])} titles.")
     return lookup
 
-def format_case_entry(title: str, lookup: Dict[str, Dict[str, str]]) -> str:
+def find_case_info(filename: str, lookup: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Smart Lookup Strategy:
+    1. Try to extract FDC code from filename -> lookup 'by_code'
+    2. Normalize filename -> lookup 'by_title' (Exact)
+    3. Normalize filename -> lookup 'by_title' (Fuzzy - High Similarity)
+    """
+    if not filename:
+        return None
+
+    by_code = lookup.get("by_code", {})
+    by_title = lookup.get("by_title", {})
+
+    # Strategy 1: Extract FDC Code (Regex)
+    # Match patterns like: FDC-25055-1X-AC, FDC-24001, etc.
+    # Heuristic: FDC followed by digits and dashes
+    code_match = re.search(r'(FDC-[\w-]+)', filename, re.IGNORECASE)
+    if code_match:
+        extracted_code = code_match.group(1).replace(" ", "").upper()
+        # Sometimes extracted code might be partial or have suffix, try exact match first
+        if extracted_code in by_code:
+            return by_code[extracted_code]
+        
+        # Fuzzy code match (optional, but exact is safer)
+        # For now, if exact extraction matches, great.
+
+    # Strategy 2: Normalize Title Match
+    # This strips "FDC-...", ".pdf", spaces, punctuation
+    # Example: "FDC-25055-1X-AC “雪王”5000店出海.pdf" -> "雪王5000店出海"
+    # CSV Title: "“雪王”5000店出海：复制核心..." -> "雪王5000店出海复制核心"
+    
+    filename_key = normalize_key(filename)
+    # Remove the FDC code part from the key if it exists to avoid noise
+    if code_match:
+        code_part = normalize_key(code_match.group(1))
+        filename_key = filename_key.replace(code_part, "")
+
+    if not filename_key:
+        return None
+
+    # 2.1 Exact match in normalized dictionary
+    if filename_key in by_title:
+        return by_title[filename_key]
+    
+    # 2.2 Fallback: Partial match / Fuzzy match
+    # Since keys are strings, we can iterate. 
+    # Use SequenceMatcher for high-quality fuzzy matching (e.g., > 85% similarity)
+    
+    best_match = None
+    best_ratio = 0.0
+    
+    # Optimization: Filter roughly by length first to avoid slow comparisons on totally different strings
+    target_len = len(filename_key)
+    
+    for db_key, info in by_title.items():
+        # Length check: if lengths differ by more than 30%, unlikely to be a match
+        if abs(len(db_key) - target_len) / max(len(db_key), 1) > 0.3:
+            continue
+            
+        # Quick check: substring
+        if filename_key in db_key or db_key in filename_key:
+             return info
+        
+        # Fuzzy check
+        ratio = difflib.SequenceMatcher(None, filename_key, db_key).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = info
+
+    # Threshold: 0.85 means 85% similarity.
+    # "克明食品..." vs "克明面业..." is usually > 90%
+    if best_ratio > 0.8:
+        return best_match
+                 
+    return None
+
+def format_case_entry(filename: str, lookup: Dict[str, Any]) -> str:
     """Build display string: 公司（第一作者） DOI."""
-    norm = normalize_title(title)
-    info = lookup.get(norm)
+    
+    # Use Smart Lookup
+    info = find_case_info(filename, lookup)
+    
+    # If no info found at all, just return the filename to indicate source
     if not info:
-        return title
-    company = info.get("company") or ""
-    author = info.get("author") or ""
-    doi = info.get("doi") or ""
+        return filename.replace(".pdf", "")
+
+    company = info.get("company", "").strip()
+    author = info.get("author", "").strip()
+    doi = info.get("doi", "").strip()
+    # Title is NOT used for display in this column
+    
     parts = []
+    
+    # Part 1: Company & Author
+    id_part = ""
     if company and author:
-        parts.append(f"{company}（{author}）")
+        id_part = f"{company}（{author}）"
     elif company:
-        parts.append(company)
+        id_part = company
     elif author:
-        parts.append(author)
+        id_part = author
+    
+    if id_part:
+        parts.append(id_part)
+    
+    # Part 2: DOI
     if doi:
         parts.append(doi)
-    return " ".join(parts) if parts else title
+        
+    # If we have neither company/author NOR DOI, fallback to filename 
+    # so the user knows which file triggered the match.
+    if not parts:
+        return filename.replace(".pdf", "")
+        
+    return " ".join(parts)
 
 def build_checklist_rows(items: List[Dict[str, Any]], lookup: Dict[str, Dict[str, str]]):
     rows = []
@@ -1278,7 +1418,7 @@ def build_checklist_rows(items: List[Dict[str, Any]], lookup: Dict[str, Dict[str
         case_entries = []
         for ev in evidence:
             fname = ev.get("filename", "")
-            norm = normalize_title(fname)
+            norm = normalize_key(fname)
             if not fname or norm in seen:
                 continue
             seen.add(norm)
