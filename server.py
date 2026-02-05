@@ -1518,21 +1518,50 @@ def generate_checklist_docx_bytes(data: Dict[str, Any]) -> bytes:
     explicit_rows = build_checklist_rows(results.get("explicit_theories", []), lookup)
     implicit_rows = build_checklist_rows(results.get("implicit_theories", []), lookup)
 
-    def add_section(doc: Any, title: str, rows):
+    def add_section(doc: Any, title: str, prefix: str, rows):
         if not rows:
             return
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.table import WD_ALIGN_VERTICAL
+        
         doc.add_paragraph(title).runs[0].bold = True
-        table = doc.add_table(rows=len(rows) + 1, cols=4)
+        table = doc.add_table(rows=len(rows) + 1, cols=5)
         table.style = "Table Grid"
-        headers = ["理论/工具/模型", "重合数", "已入库案例企业、一作及 DOI 编号", "备注"]
+        
+        # 合并第一列和第二列的表头单元格
+        header_cell_0 = table.rows[0].cells[0]
+        header_cell_1 = table.rows[0].cells[1]
+        header_cell_0.merge(header_cell_1)
+        
+        headers = ["理论/工具/模型", "", "重合数", "已入库案例企业、一作及 DOI 编号", "备注"]
         for i, h in enumerate(headers):
-            run = table.rows[0].cells[i].paragraphs[0].add_run(h)
+            if i == 1: continue # 跳过被合并的单元格
+            cell = table.rows[0].cells[i]
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(h)
             run.bold = True
+            
         for ridx, r in enumerate(rows, 1):
-            table.rows[ridx].cells[0].text = str(r["concept"])
-            table.rows[ridx].cells[1].text = str(r["count"])
-            table.rows[ridx].cells[2].text = "\n".join(r["cases"])
-            table.rows[ridx].cells[3].text = r["remark"]
+            row = table.rows[ridx]
+            # 第一列：索引
+            row.cells[0].text = f"{prefix} {ridx}"
+            # 第二列：概念名称
+            row.cells[1].text = str(r["concept"])
+            # 第三列：重合数（居中）
+            p2 = row.cells[2].paragraphs[0]
+            p2.text = f"{r['count']} 篇"
+            p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # 第四列：案例信息
+            row.cells[3].text = "\n".join(r["cases"])
+            # 第五列：备注（居中）
+            p4 = row.cells[4].paragraphs[0]
+            p4.text = r["remark"]
+            p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            for cell in row.cells:
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     doc = Document()
     title1 = doc.add_heading("复旦管理案例库", level=1)
@@ -1550,15 +1579,23 @@ def generate_checklist_docx_bytes(data: Dict[str, Any]) -> bytes:
     for line in meta:
         doc.add_paragraph(line)
 
-    add_section(doc, "主概念（显性提及）", explicit_rows)
-    add_section(doc, "次概念（隐性提及）", implicit_rows)
+    add_section(doc, "主概念（显性提及）", "主概念", explicit_rows)
+    add_section(doc, "次概念（隐性提及）", "次概念", implicit_rows)
 
     note = (
         "复旦管理案例库以教学应用为导向，为更好地满足教学需要，提高入库案例产品质量，"
         "对所有投稿案例采用严谨的学术评审流程。案例中心通过动态搭建最新五年入库案例知识图谱并借助人工智能工具，"
         "对新投稿案例的知识点进行查重，供同行评议参考。"
     )
-    doc.add_paragraph(note).runs[0].font.size = Pt(9)
+    # 将该段文字设置为页脚（模拟脚注效果）
+    section = doc.sections[0]
+    footer = section.footer
+    footer_para = footer.paragraphs[0]
+    footer_para.clear()
+    run_num = footer_para.add_run("1")
+    run_num.font.superscript = True
+    run_text = footer_para.add_run(" " + note)
+    run_text.font.size = Pt(9)
 
     bio = io.BytesIO()
     doc.save(bio)
